@@ -89,6 +89,7 @@ class PPTXParser(DocumentParser):
             raise FileNotFoundError(f"PPTX file not found at: {file_path}")
             
         try:
+            # pyrefly: ignore [missing-import]
             from pptx import Presentation
         except ImportError:
             raise ImportError(

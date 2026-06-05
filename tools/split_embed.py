@@ -350,6 +350,7 @@ class FAISSVectorStore:
         child chunks with their corresponding parent chunks.
         """
         self._check_faiss()
+        # pyrefly: ignore [missing-import]
         import numpy as np
 
         q_arr = np.array([query_embedding], dtype=np.float32)
@@ -421,72 +422,106 @@ class FAISSVectorStore:
         ]
 
 
+# =====================================================================
+# INGEST PIPELINE (End-to-End: file_path → parse → split → embed → save)
+# =====================================================================
+
+class IngestPipeline:
+    """
+    End-to-end pipeline that:
+      1. Parses a PDF/PPTX file using ParserFactory
+      2. Splits extracted text into hierarchical parent/child chunks
+      3. Embeds child chunks using BGE
+      4. Saves the FAISS index + metadata to disk for later retrieval
+    """
+
+    def __init__(
+        self,
+        index_directory: str = "data/faiss_index",
+        model_name: str = "BAAI/bge-large-en-v1.5",
+        embedding_dimension: int = 1024
+    ):
+        self.index_directory = index_directory
+        self.model_name = model_name
+        self.embedding_dimension = embedding_dimension
+
+    def ingest(self, file_path: str) -> Dict[str, Any]:
+        """
+        Runs the full ingestion pipeline for a single document.
+
+        Args:
+            file_path (str): Absolute path to a PDF or PPTX file.
+
+        Returns:
+            Dict[str, Any]: Summary of what was ingested (parent count, child count, index path).
+        """
+        from tools.document_parser import ParserFactory
+
+        # 1. Parse the document
+        parser = ParserFactory.get_parser(file_path)
+        parsed_pages = parser.parse(file_path)
+
+        # Combine all page/slide text into one document string
+        full_text = "\n\n".join(page["text"] for page in parsed_pages if page["text"])
+
+        if not full_text.strip():
+            raise ValueError(f"No text could be extracted from: {file_path}")
+
+        doc_metadata = {
+            "source": os.path.basename(file_path),
+            "file_type": parsed_pages[0]["metadata"].get("file_type", "unknown"),
+            "total_units": len(parsed_pages)
+        }
+
+        # 2. Split into parent/child chunks
+        splitter = HierarchicalSplitter()
+        parents, children = splitter.split_document(full_text, doc_metadata)
+
+        if not children:
+            raise ValueError("Splitter produced zero child chunks from the extracted text.")
+
+        # 3. Embed child chunks
+        embedder = BGEEmbedder(model_name=self.model_name)
+        child_texts = [c.text for c in children]
+        child_embeddings = embedder.embed_documents(child_texts)
+
+        # 4. Build FAISS index and add documents
+        vector_store = FAISSVectorStore(dimension=self.embedding_dimension)
+        vector_store.add_documents(children, parents, child_embeddings)
+
+        # 5. Save to disk
+        vector_store.save(self.index_directory)
+
+        return {
+            "source": os.path.basename(file_path),
+            "parents_created": len(parents),
+            "children_created": len(children),
+            "index_saved_to": os.path.abspath(self.index_directory)
+        }
+
+
 # ==========================================
-# EXAMPLE USAGE (Executable Example in Comments)
+# EXAMPLE USAGE
 # ==========================================
-# 
+#
 # if __name__ == "__main__":
-#     # Dummy Policy Document Text
-#     document_text = """
-#     🔐 1. Access Management Policy
-#     This policy regulates who has access to production servers. Only authorized operations personnel
-#     may request administrative privileges. All requests must undergo peer approval.
-#     
-#     Key Highlights:
-#     * All logins require MFA (Multi-Factor Authentication).
-#     * Access keys must be rotated every 90 days.
-#     
-#     Required Records:
-#     * Admin logs showing request/approval ID.
-#     * Periodic access audits signed off by the Security Officer.
-#     
-#     🛡️ 2. Anti-Virus Policy
-#     This policy regulates security controls installed on server infrastructure.
-#     All endpoints must execute active background scanning.
-#     
-#     Key Highlights:
-#     * Signatures must update hourly.
-#     * Centralized alert logging to SIEM.
-#     """
-#     
-#     # 1. Initialize splitter and split document into parent-child structure
-#     splitter = HierarchicalSplitter()
-#     parents, children = splitter.split_document(document_text, {"source": "test_policy.txt"})
-#     
-#     print(f"Split completed: Produced {len(parents)} Parents and {len(children)} Children.")
-#     
-#     for p in parents:
-#         print(f"\nParent ID: {p.id} (Tokens: {count_tokens(p.text)})")
-#         print(f"Text Preview: {p.text[:120]}...")
-#         print(f"Child Chunks Linked: {p.child_ids}")
-#         
-#     for c in children[:3]:
-#         print(f"\nChild ID: {c.id} (Parent: {c.parent_id}, Tokens: {count_tokens(c.text)})")
-#         print(f"Child Text: {c.text}")
-# 
-#     # 2. Embedding generation and FAISS Store indexing
-#     try:
-#         # Embedder using default 'BAAI/bge-large-en-v1.5' (dim = 1024)
-#         embedder = BGEEmbedder(model_name="BAAI/bge-large-en-v1.5")
-#         
-#         # Embed all child chunks
-#         child_texts = [c.text for c in children]
-#         child_embeddings = embedder.embed_documents(child_texts)
-#         
-#         # Initialize Vector Store (BGE Large dimensions is 1024)
-#         vector_store = FAISSVectorStore(dimension=1024)
-#         vector_store.add_documents(children, parents, child_embeddings)
-#         
-#         # Perform similarity search
-#         query = "What is the update frequency for anti-virus signatures?"
-#         query_emb = embedder.embed_query(query)
-#         results = vector_store.similarity_search(query_emb, k=1)
-#         
-#         if results:
-#             match = results[0]
-#             print(f"\n--- RAG Retrieval Match (Score: {match['score']:.4f}) ---")
-#             print(f"Matched Child Text: {match['child']['text']}")
-#             print(f"\nRetrieved Parent Context (For LLM Synthesis):\n{match['parent']['text']}")
-#             
-#     except Exception as e:
-#         print(f"\nSkipped full vector search run (Expected if libraries/GPU not setup): {e}")
+#     # Ingest a PPTX file end-to-end
+#     pipeline = IngestPipeline(index_directory="data/faiss_index")
+#     result = pipeline.ingest("data/Information Security Management System (ISMS) Policy Summaries_ (1).pptx")
+#     print(result)
+#     # Output:
+#     # {
+#     #   "source": "Information Security Management System (ISMS) Policy Summaries_ (1).pptx",
+#     #   "parents_created": 5,
+#     #   "children_created": 18,
+#     #   "index_saved_to": "/absolute/path/to/data/faiss_index"
+#     # }
+#
+#     # Later, load the saved index and search
+#     from tools.split_embed import FAISSVectorStore, BGEEmbedder
+#     store = FAISSVectorStore(dimension=1024)
+#     store.load("data/faiss_index")
+#     embedder = BGEEmbedder()
+#     query_emb = embedder.embed_query("What are the constraints on Windows updates?")
+#     results = store.similarity_search(query_emb, k=1)
+#     print(results)

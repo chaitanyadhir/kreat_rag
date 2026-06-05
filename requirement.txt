@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+mcp
+pypdf
+python-pptx
+tiktoken
+sentence-transformers
+faiss-cpu
+numpy
+rank_bm25
