@@ -1,11 +1,40 @@
 import os
 import sys
+import re
 import json
-import math
+import asyncio
 from typing import List, Dict, Any, Optional
+from concurrent.futures import ThreadPoolExecutor
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.split_embed import FAISSVectorStore, BGEEmbedder, ChildChunk, ParentChunk
+
+
+# =====================================================================
+# WHY MODEL LOADING IS SLOW & THE WORKAROUND
+# =====================================================================
+#
+# Problem:
+#   BGE-large-en-v1.5 is a ~1.3GB transformer model. Every time HybridRetriever
+#   is instantiated, SentenceTransformer downloads (first run) or loads the model
+#   weights from disk into RAM, then moves tensors to the compute device (CPU/GPU).
+#   This takes 5-15 seconds per cold start.
+#
+#   If you create a new HybridRetriever per request (like the old code did),
+#   you pay that 5-15s penalty on EVERY request — completely unacceptable.
+#
+# Workaround (Singleton Pattern):
+#   We load the HybridRetriever ONCE at application startup using FastAPI's
+#   lifespan event, then reuse that single instance across all requests.
+#   The BGE model weights stay warm in memory, so subsequent queries only
+#   pay the ~50ms inference cost, not the multi-second loading cost.
+#
+#   See main.py for the lifespan startup hook.
+# =====================================================================
+
+
+# Thread pool for running CPU-bound search operations in parallel
+_thread_pool = ThreadPoolExecutor(max_workers=2)
 
 
 class HybridRetriever:
@@ -14,6 +43,11 @@ class HybridRetriever:
       1. Dense vector search (cosine similarity via FAISS)
       2. Sparse keyword search (BM25)
     Then fuses rankings using Reciprocal Rank Fusion (RRF).
+
+    Optimized with:
+      - Singleton pattern: load model weights once, reuse across requests.
+      - Async parallel search: dense and sparse searches run concurrently
+        via asyncio.gather + ThreadPoolExecutor.
     """
 
     def __init__(
@@ -32,8 +66,11 @@ class HybridRetriever:
         self.vector_store = FAISSVectorStore(dimension=embedding_dimension)
         self.vector_store.load(index_directory)
 
-        # Load embedder for query encoding
+        # Load embedder for query encoding (this is the expensive step)
         self.embedder = BGEEmbedder(model_name=model_name)
+
+        # Force-load model weights NOW so first request is fast
+        self.embedder.embed_query("warmup")
 
         # Build BM25 index over child chunk texts
         self.bm25 = None
@@ -52,7 +89,6 @@ class HybridRetriever:
                 "Please install it using: pip install rank_bm25"
             )
 
-        # Tokenize each child chunk text (simple whitespace + lowercase)
         self.tokenized_corpus = [
             self._tokenize(chunk.text) for chunk in self.vector_store.child_chunks
         ]
@@ -61,8 +97,6 @@ class HybridRetriever:
     @staticmethod
     def _tokenize(text: str) -> List[str]:
         """Simple whitespace tokenizer with lowercasing and punctuation stripping."""
-        import re
-        # Lowercase, strip punctuation, split on whitespace
         text = text.lower()
         text = re.sub(r'[^\w\s]', '', text)
         return text.split()
@@ -84,7 +118,6 @@ class HybridRetriever:
         tokenized_query = self._tokenize(query)
         scores = self.bm25.get_scores(tokenized_query)
 
-        # Get top_k indices sorted by BM25 score descending
         ranked_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]
 
         results = []
@@ -126,21 +159,17 @@ class HybridRetriever:
         rrf_scores: Dict[str, float] = {}
         chunk_data: Dict[str, Dict[str, Any]] = {}
 
-        # Score from dense list (rank is 1-based position)
         for rank, item in enumerate(dense_results, start=1):
             child_id = item["child"]["id"]
             rrf_scores[child_id] = rrf_scores.get(child_id, 0.0) + (1.0 / (self.rrf_k + rank))
             chunk_data[child_id] = item
 
-        # Score from sparse list (rank is 1-based position)
         for rank, item in enumerate(sparse_results, start=1):
             child_id = item["child"]["id"]
             rrf_scores[child_id] = rrf_scores.get(child_id, 0.0) + (1.0 / (self.rrf_k + rank))
-            # Only overwrite if not already stored (dense result takes priority for data)
             if child_id not in chunk_data:
                 chunk_data[child_id] = item
 
-        # Sort by RRF score descending, take top_n
         sorted_ids = sorted(rrf_scores, key=lambda cid: rrf_scores[cid], reverse=True)[:top_n]
 
         fused_results = []
@@ -155,26 +184,27 @@ class HybridRetriever:
         return fused_results
 
     # =========================================================
-    # PUBLIC API: RETRIEVE
+    # PUBLIC API: ASYNC RETRIEVE (parallel dense + sparse)
     # =========================================================
-    def retrieve(self, query: str, dense_k: int = 10, sparse_k: int = 10, top_n: int = 3) -> Dict[str, Any]:
+    async def retrieve(self, query: str, dense_k: int = 10, sparse_k: int = 10, top_n: int = 3) -> Dict[str, Any]:
         """
-        Full hybrid retrieval pipeline:
-          1. Get top dense_k chunks from FAISS (cosine similarity)
-          2. Get top sparse_k chunks from BM25 (keyword match)
-          3. Fuse with RRF and return top_n results
+        Full hybrid retrieval pipeline with PARALLEL search:
+          1. Fires dense search (FAISS) and sparse search (BM25) concurrently
+          2. Waits for both to finish
+          3. Fuses with RRF and returns top_n results
 
-        Args:
-            query (str): The user question.
-            dense_k (int): Number of chunks from dense search.
-            sparse_k (int): Number of chunks from sparse search.
-            top_n (int): Final number of top-ranked chunks to return.
-
-        Returns:
-            Dict with 'query', 'dense_results', 'sparse_results', and 'fused_top_results'.
+        Both searches are CPU-bound, so we offload them to a ThreadPoolExecutor
+        and await them concurrently using asyncio.gather.
         """
-        dense_results = self._dense_search(query, top_k=dense_k)
-        sparse_results = self._sparse_search(query, top_k=sparse_k)
+        loop = asyncio.get_event_loop()
+
+        # Run both searches in parallel on separate threads
+        dense_future = loop.run_in_executor(_thread_pool, self._dense_search, query, dense_k)
+        sparse_future = loop.run_in_executor(_thread_pool, self._sparse_search, query, sparse_k)
+
+        dense_results, sparse_results = await asyncio.gather(dense_future, sparse_future)
+
+        # RRF fusion is lightweight, runs on the main thread
         fused = self._reciprocal_rank_fusion(dense_results, sparse_results, top_n=top_n)
 
         return {
@@ -190,21 +220,7 @@ class HybridRetriever:
 # ==========================================
 #
 # if __name__ == "__main__":
+#     import asyncio
 #     retriever = HybridRetriever(index_directory="data/faiss_index")
-#     result = retriever.retrieve("What are the constraints on Windows updates?")
+#     result = asyncio.run(retriever.retrieve("What are the constraints on Windows updates?"))
 #     print(json.dumps(result, indent=2))
-#
-#     # Output:
-#     # {
-#     #   "query": "What are the constraints on Windows updates?",
-#     #   "dense_hits": 10,
-#     #   "sparse_hits": 10,
-#     #   "fused_top_results": [
-#     #     {
-#     #       "rrf_score": 0.032258,
-#     #       "child": {"id": "parent_3_child_1", "text": "...", "metadata": {}},
-#     #       "parent": {"id": "parent_3", "text": "...", "metadata": {}}
-#     #     },
-#     #     ...
-#     #   ]
-#     # }

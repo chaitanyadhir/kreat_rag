@@ -19,21 +19,38 @@ class RetrievalRequest(BaseModel):
 
 
 # ==========================================
+# SINGLETON RETRIEVER (loaded once, reused across requests)
+# ==========================================
+# We store a module-level reference. main.py's lifespan hook initializes it
+# once at startup so the BGE model weights are warm before first request.
+_retriever: Optional[HybridRetriever] = None
+
+
+def get_retriever(index_directory: str = "data/faiss_index") -> HybridRetriever:
+    """Returns the singleton retriever, creating it on first call."""
+    global _retriever
+    if _retriever is None:
+        _retriever = HybridRetriever(index_directory=index_directory)
+    return _retriever
+
+
+def warmup_retriever(index_directory: str = "data/faiss_index"):
+    """Called by main.py at startup to pre-load model weights."""
+    global _retriever
+    _retriever = HybridRetriever(index_directory=index_directory)
+
+
+# ==========================================
 # ROUTER
 # ==========================================
 router = APIRouter()
 
 
-@router.get("/health")
-async def health():
-    return {"status": "healthy"}
-
-
 @router.post("/api/retrieve")
 async def retrieve_chunks(payload: RetrievalRequest):
     """
-    Takes a question string, runs hybrid retrieval (10 dense + 10 sparse BM25),
-    fuses with Reciprocal Rank Fusion (RRF), and returns top N chunks.
+    Takes a question string, runs hybrid retrieval (10 dense + 10 sparse BM25)
+    in PARALLEL, fuses with Reciprocal Rank Fusion (RRF), and returns top N chunks.
     """
     if not os.path.exists(payload.index_directory):
         raise HTTPException(
@@ -42,8 +59,9 @@ async def retrieve_chunks(payload: RetrievalRequest):
         )
 
     try:
-        retriever = HybridRetriever(index_directory=payload.index_directory)
-        result = retriever.retrieve(
+        retriever = get_retriever(payload.index_directory)
+        # retrieve() is now async — dense + sparse run in parallel
+        result = await retriever.retrieve(
             query=payload.query,
             dense_k=10,
             sparse_k=10,
@@ -58,15 +76,10 @@ async def retrieve_chunks(payload: RetrievalRequest):
 # EXAMPLE USAGE
 # ==========================================
 #
-# Run:
-#   uvicorn controllers.retreiver_api:app --host 0.0.0.0 --port 8002 --reload
+# Run via main.py:
+#   uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 #
 # Retrieve top 3 chunks for a question:
-#   curl -X POST http://localhost:8002/api/retrieve \
+#   curl -X POST http://localhost:8000/api/retrieve \
 #     -H "Content-Type: application/json" \
 #     -d '{"query": "What are the constraints on Windows updates?"}'
-#
-# With custom index directory and top_n:
-#   curl -X POST http://localhost:8002/api/retrieve \
-#     -H "Content-Type: application/json" \
-#     -d '{"query": "What audit logs do I need for BYOD?", "index_directory": "data/faiss_index", "top_n": 5}'
