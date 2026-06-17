@@ -1,10 +1,21 @@
-fastapi
-uvicorn
-mcp
-pypdf
-python-pptx
-tiktoken
-sentence-transformers
-faiss-cpu
-numpy
-rank_bm25
+
+# Web Framework & Server (Allows minor updates/performance fixes, prevents breaking changes)
+fastapi>=0.136.0,<0.137.0
+uvicorn>=0.49.0,<0.50.0
+
+# Protocol & Parsing
+mcp>=1.27.0,<2.0.0
+pypdf>=6.13.0,<7.0.0
+python-pptx>=1.0.0,<2.0.0
+
+# Tokenization & Embeddings
+# Keeping tiktoken locked to 0.x because its internal tokenization behavior changes can break existing vector databases.
+tiktoken>=0.13.0,<0.14.0
+sentence-transformers>=5.5.0,<6.0.0
+
+# Math & Core Retrieval Vector Engine
+# CRITICAL: We lock the major version 2 for numpy and major 1 for faiss-cpu 
+# to ensure their pre-compiled binary wheels stay fully compatible with each other.
+numpy>=2.2.0,<2.3.0
+faiss-cpu>=1.14.0,<2.0.0
+rank_bm25>=0.2.2,<0.3.0
