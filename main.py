@@ -3,6 +3,11 @@ import sys
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Add project root to python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -10,7 +15,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # Import routers from controllers
 from controllers.parser_api import router as parser_router
 from controllers.split_embed_api import router as split_embed_router
-from controllers.retreiver_api import router as retriever_router, warmup_retriever
+from controllers.retriever_api import router as retriever_router, warmup_retriever
 
 logger = logging.getLogger("kreat_rag")
 
@@ -23,17 +28,9 @@ async def lifespan(app: FastAPI):
     """
     Runs once when the server starts. We use this to pre-load the BGE model
     weights and FAISS index so the first /api/retrieve request is fast.
-    
-    Without this, every cold request would wait 5-15s while SentenceTransformer:
-      1. Reads ~1.3GB of model weights from disk
-      2. Deserializes PyTorch tensors
-      3. Moves them to the compute device (CPU or GPU)
-    
-    With the lifespan hook, this happens ONCE at boot, and all subsequent
-    requests reuse the warm model in memory (~50ms inference).
     """
-    index_dir = os.environ.get("FAISS_INDEX_DIR", "data/faiss_index")
-    if os.path.exists(index_dir):
+    index_dir = os.environ.get("FAISS_INDEX_DIR")
+    if index_dir and os.path.exists(index_dir):
         logger.info("Warming up HybridRetriever (loading BGE model + FAISS index)...")
         try:
             warmup_retriever(index_directory=index_dir)
@@ -49,6 +46,17 @@ async def lifespan(app: FastAPI):
 # MAIN FASTAPI APP
 # ==========================================
 app = FastAPI(title="Kreat RAG API", lifespan=lifespan)
+
+# CORS Configuration
+origins = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # Health check for the main app

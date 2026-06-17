@@ -52,11 +52,14 @@ class HybridRetriever:
 
     def __init__(
         self,
-        index_directory: str = "data/faiss_index",
+        index_directory: str = None,
         model_name: str = "BAAI/bge-large-en-v1.5",
         embedding_dimension: int = 1024,
         rrf_k: int = 60
     ):
+        if index_directory is None:
+            index_directory = os.getenv("FAISS_INDEX_DIR", "data/faiss_index")
+        
         self.index_directory = index_directory
         self.model_name = model_name
         self.embedding_dimension = embedding_dimension

@@ -7,6 +7,7 @@ uvicorn>=0.49.0,<0.50.0
 mcp>=1.27.0,<2.0.0
 pypdf>=6.13.0,<7.0.0
 python-pptx>=1.0.0,<2.0.0
+python-dotenv>=1.0.0,<2.0.0
 
 # Tokenization & Embeddings
 # Keeping tiktoken locked to 0.x because its internal tokenization behavior changes can break existing vector databases.

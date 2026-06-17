@@ -14,7 +14,7 @@ from tools.split_embed import IngestPipeline
 # ==========================================
 class IngestRequest(BaseModel):
     file_path: str
-    index_directory: Optional[str] = "data/faiss_index"
+    index_directory: Optional[str] = os.getenv("FAISS_INDEX_DIR", "data/faiss_index")
 
 
 # ==========================================

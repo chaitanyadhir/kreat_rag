@@ -6,7 +6,7 @@ from typing import Optional
 
 # Add parent directory to python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from tools.retreival import HybridRetriever
+from tools.retrieval import HybridRetriever
 
 
 # ==========================================
@@ -14,7 +14,7 @@ from tools.retreival import HybridRetriever
 # ==========================================
 class RetrievalRequest(BaseModel):
     query: str
-    index_directory: Optional[str] = "data/faiss_index"
+    index_directory: Optional[str] = os.getenv("FAISS_INDEX_DIR", "data/faiss_index")
     top_n: Optional[int] = 3
 
 
@@ -26,17 +26,22 @@ class RetrievalRequest(BaseModel):
 _retriever: Optional[HybridRetriever] = None
 
 
-def get_retriever(index_directory: str = "data/faiss_index") -> HybridRetriever:
+def get_retriever(index_directory: str = None) -> HybridRetriever:
     """Returns the singleton retriever, creating it on first call."""
     global _retriever
+    if index_directory is None:
+        index_directory = os.getenv("FAISS_INDEX_DIR", "data/faiss_index")
+    
     if _retriever is None:
         _retriever = HybridRetriever(index_directory=index_directory)
     return _retriever
 
 
-def warmup_retriever(index_directory: str = "data/faiss_index"):
+def warmup_retriever(index_directory: str = None):
     """Called by main.py at startup to pre-load model weights."""
     global _retriever
+    if index_directory is None:
+        index_directory = os.getenv("FAISS_INDEX_DIR", "data/faiss_index")
     _retriever = HybridRetriever(index_directory=index_directory)
 
 

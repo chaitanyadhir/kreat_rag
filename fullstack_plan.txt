@@ -1,80 +1,69 @@
- Based on a deep dive into your kreat-rag repository, here is a comprehensive analysis and a strategic plan to
-  elevate this from a backend script to a full-stack RAG (Retrieval-Augmented Generation) application.
+Good, I've seen enough. Here's the honest, minimal implementation plan based on what your code actually looks like:
 
-  1. Codebase Analysis (The "No Yes-Man" Truth)
-  Your current codebase is technically sophisticated but architecturally "headless."
+---
 
-   * The Good:
-       * Advanced RAG Logic: Your use of Parent-Child Chunking (in HierarchicalSplitter) and Hybrid Retrieval
-         with RRF (in HybridRetriever) is top-tier. Most "beginner" RAG apps just use simple embeddings; you are
-         already using production-grade techniques.
-       * Resource Management: The lifespan hook in main.py for model warming is excellent. It prevents the 5-10s
-         latency on the first request.
-       * Extensibility: The ParserFactory pattern is clean and allows you to add .docx or .html support in
-         minutes.
-   * The Gaps:
-       * State Management: Currently, you rely on metadata.json and a local FAISS index. This won't scale. If you
-         delete a file, you have to manually clean up JSON and re-build indexes.
-       * Visibility: The entire pipeline is a "black box." A user cannot see what documents are currently indexed
-         or what the status of an ingestion task is.
-       * Static Ingestion: The file_path is hardcoded or passed as a string. A real app needs multipart file
-         uploads.
+## Reality Check First
 
-  ---
+Your `main.py` is clean. You already have a working FastAPI app with three routers (parse, ingest, retrieve) and a smart lifespan hook. The core RAG is solid. What's missing is plumbing, not intelligence.
 
-  2. The Full-Stack Integration Plan (Minimal but Impactful)
-  To showcase full-stack knowledge, you need to move from File-based to Database-driven.
+Here's the minimal path — no bloat, no over-engineering.
 
-  Step A: The Database (PostgreSQL)
-  Instead of metadata.json, use PostgreSQL to manage the "Source of Truth."
-   * Table documents: id, filename, upload_date, status (Processing, Success, Failed), total_chunks.
-   * Table chunks: id, document_id, text, parent_id, metadata (JSONB).
-   * Why this shows knowledge: It proves you understand relational data, ACID properties, and how to link
-     unstructured text (RAG) with structured metadata.
+---
 
-  Step B: The Backend Refactor (FastAPI)
-   1. File Upload Endpoint: Replace file_path string inputs with UploadFile. Save files to a uploads/ directory
-      temporarily.
-   2. Background Tasks: Ingestion (parsing/embedding) is slow. Use FastAPI BackgroundTasks so the user gets an
-      immediate "Upload started" response while the server works in the background.
-   3. CRUD Endpoints: GET /documents to list history, DELETE /documents/{id} to wipe data from both Postgres and
-      FAISS.
+## Phase 1: Fix the Embarrassing Stuff (1 day)
 
-  Step C: The Frontend (React)
-  Build a Single Page Application (SPA) with two main views:
-   1. The Ingestion Dashboard:
-       * A drag-and-drop zone (use react-dropzone).
-       * A table showing uploaded files and their "Indexing Status" (spinning loader vs. green checkmark).
-   2. The Search/Chat Interface:
-       * A clean input bar.
-       * "Evidence Cards": When a result is returned, don't just show text. Show a card with the source filename
-         and page/slide number (this proves your metadata pipeline works).
+**Step 1 — Rename the typo.** `data_processing,py` → `data_processing.py`. Do this first. It's the first thing anyone who clones your repo will notice.
 
-  ---
+**Step 2 — Add a `.env` file + `python-dotenv`.** Your `FAISS_INDEX_DIR` is already read from `os.environ`. Stop hardcoding defaults. Put config in `.env`, load it at startup. Anyone running your project shouldn't have to dig through code to change paths.
 
-  3. Recommended Tech Stack
-   * Frontend: React + Vite + Tailwind CSS. (Tailwind makes it look professional with 10% of the effort).
-   * Backend: FastAPI (existing) + SQLModel (it’s Pydantic + SQLAlchemy combined, perfect for your current
-     style).
-   * Database: PostgreSQL.
-   * Orchestration: Docker Compose. (Running docker-compose up to launch the App, DB, and API is the ultimate "I
-     know what I'm doing" signal).
+**Step 3 — Add `CORS` middleware to `main.py`.** Right now a browser can't call your API at all. Add FastAPI's `CORSMiddleware` allowing `localhost:5173` (Vite's default port). Without this, your future frontend will hit a wall immediately.
 
-  ---
+---
 
-  4. Your Learning Roadmap (The "How-To")
-  To understand and implement this entire approach, you need to master these 4 pillars:
+## Phase 2: The One Database Table That Matters (1–2 days)
 
-   1. Database Integration (SQLModel/SQLAlchemy):
-       * What to learn: How to define a Model, how to use Session to inject DB access into FastAPI routes, and
-         how to perform basic CRUD.
-   2. Asynchronous Programming (Python/FastAPI):
-       * What to learn: How await works in your retrieve function and how to use BackgroundTasks for the
-         ingestion pipeline so the UI doesn't freeze.
-   3. Modern React (Hooks & API):
-       * What to learn: useState (for the search query), useEffect (to fetch the document list), and Axios or
-         Fetch to talk to your FastAPI backend.
-  Immediate Next Steps:
-   1. Fix the typo: Rename pipeline/data_processing,py to pipeline/data_processing.py.
-   2. Install SQLModel: Add sqlmodel and psycopg2-binary to your requirements.txt.
-   3. Initialize React: Run npm create vite@latest frontend -- --template react-ts in your root folder.
+Don't add PostgreSQL yet. That's yak shaving. Use **SQLite + SQLModel** — zero infrastructure, same API, you can swap to Postgres later with one line change.
+
+**Step 4 — Create a single `documents` table.** Fields: `id`, `filename`, `status` (Processing / Success / Failed), `chunk_count`, `created_at`. That's it. No chunks table yet.
+
+**Step 5 — Wire it into your existing `/api/ingest` endpoint.** Before ingestion starts, insert a row with status=Processing. When it finishes, update to Success with chunk count. If it throws, update to Failed. Your existing ingestion logic doesn't change at all — you're just bookmarking it.
+
+**Step 6 — Add `GET /api/documents`.** Returns the list of rows. This is 5 lines of code. Now you have a real "what's indexed" endpoint instead of manually reading `metadata.json`.
+
+---
+
+## Phase 3: Make Ingestion Non-Blocking (half a day)
+
+**Step 7 — Use `BackgroundTasks` in `/api/ingest`.** Right now your ingest endpoint blocks until the entire embedding is done. For a big PDF this could be 30+ seconds with a hung HTTP connection. Change it so the endpoint immediately returns `{"status": "Processing", "document_id": 5}` and the actual embedding happens in the background. The DB row you added in Phase 2 is how the client polls for status.
+
+This is critical for the frontend to feel responsive. It also demonstrates you understand async properly — not just slapping `async def` on everything.
+
+---
+
+## Phase 4: Minimal React Frontend (2–3 days)
+
+**Step 8 — Scaffold with Vite.** Run `npm create vite@latest frontend -- --template react-ts`. Don't use CRA, it's dead. Put the `frontend/` folder at repo root alongside your Python code.
+
+**Step 9 — Build two components only.** Not a full app. Just two:
+
+First, an **Upload component**. A file input (not drag-and-drop yet — that's a nice-to-have), a button that calls `POST /api/ingest` with `multipart/form-data`, and a status message. That's it.
+
+Second, a **Document list component**. Calls `GET /api/documents` on mount with `useEffect`. Renders a table of filenames and statuses. Polls every 3 seconds if any row has status=Processing. This is the visual proof that your background task works.
+
+**Step 10 — Add a Search bar.** One input, one button, calls `POST /api/retrieve`. Render the results below. For each result, show the source filename from metadata. This is the "Evidence Card" from the plan — but dead simple, just a div with a border.
+
+---
+
+## Phase 5: Docker Compose (half a day)
+
+**Step 11 — Write a `docker-compose.yml` with two services.** Just `api` (your FastAPI app) and `frontend` (Vite dev server or nginx serving the built files). SQLite lives inside the api container — no separate DB service needed at this stage.
+
+This is the one step that makes the whole thing "production-looking" to anyone reviewing the repo. `docker-compose up` → everything works. That's the signal.
+
+---
+
+## What to Skip (Seriously)
+
+Don't add PostgreSQL until you actually need it. SQLite handles thousands of documents fine and eliminates an entire infrastructure dependency. Don't add react-dropzone, authentication, user accounts, or chunk-level tables. Those are all scope creep for what this project needs to demonstrate right now.
+
+The full plan in the document you shared is good directionally, but it front-loads the hard infrastructure (Postgres, full CRUD) before proving the UI even connects. The order above gets you to a working demo faster and lets you add complexity on a solid foundation.
