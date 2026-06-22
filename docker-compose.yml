@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: kreat
+      POSTGRES_PASSWORD: kreat
+      POSTGRES_DB: kreat
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kreat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_URL: postgresql://kreat:kreat@db:5432/kreat
+      FAISS_INDEX_DIR: data/faiss_index
+      ALLOWED_ORIGINS: http://localhost:5173
+    volumes:
+      - ./data:/app/data
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
