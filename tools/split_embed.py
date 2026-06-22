@@ -448,7 +448,7 @@ class IngestPipeline:
         self.model_name = model_name
         self.embedding_dimension = embedding_dimension
 
-    def ingest(self, file_path: str) -> Dict[str, Any]:
+    def ingest(self, file_path: str, original_filename: str = None) -> Dict[str, Any]:
         """
         Runs the full ingestion pipeline for a single document.
 
@@ -471,7 +471,7 @@ class IngestPipeline:
             raise ValueError(f"No text could be extracted from: {file_path}")
 
         doc_metadata = {
-            "source": os.path.basename(file_path),
+            "source": original_filename or os.path.basename(file_path),
             "file_type": parsed_pages[0]["metadata"].get("file_type", "unknown"),
             "total_units": len(parsed_pages)
         }

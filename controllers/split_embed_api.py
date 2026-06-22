@@ -11,13 +11,13 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.split_embed import IngestPipeline
 
 
-def run_ingestion_task(document_id: int, file_path: str, index_directory: str):
+def run_ingestion_task(document_id: int, file_path: str, index_directory: str, original_filename: str):
     with Session(engine) as session:
         document = session.get(Document, document_id)
 
         try:
             pipeline = IngestPipeline(index_directory=index_directory)
-            result = pipeline.ingest(file_path)
+            result = pipeline.ingest(file_path, original_filename=original_filename)
 
             document.status = "success"
             document.chunk_count = result.get("children_created")
@@ -78,7 +78,7 @@ async def ingest_document(
     session.add(document)
     session.commit()
     session.refresh(document)
-    background_tasks.add_task(run_ingestion_task, document.id, temp_path, index_directory)
+    background_tasks.add_task(run_ingestion_task, document.id, temp_path, index_directory, file.filename)
     
     return {
         "success": True,
