@@ -1,7 +1,9 @@
+from db import session
 from fastapi import APIRouter, HTTPException, Depends 
 from db.session import get_session
 from db.models import Document
 from sqlmodel import Session, select
+import os
 
 router = APIRouter()
 
@@ -32,7 +34,12 @@ def delete_document(
 
     session.delete(document)
     session.commit()
-
+    remaining = session.exec(select(Document)).all()
+    if not remaining:
+        index_dir = os.getenv("FAISS_INDEX_DIR", "data/faiss_index")
+        # wipe the FAISS index directory
+        import shutil
+        shutil.rmtree(index_dir, ignore_errors=True)
     return {
         "message": "Document deleted successfully"
     }

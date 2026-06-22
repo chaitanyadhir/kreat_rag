@@ -1,19 +1,39 @@
 import os
 import sys
-from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
 import tempfile
 import shutil
-from pydantic import BaseModel
-from typing import Optional
-from sqlmodel import Session 
 from db.session import get_session 
 from db.models import Document 
-# Add parent directory to python path to import tools package
+from db.session import engine
+from sqlmodel import Session
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends, BackgroundTasks
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.split_embed import IngestPipeline
 
 
+def run_ingestion_task(document_id: int, file_path: str, index_directory: str):
+    with Session(engine) as session:
+        document = session.get(Document, document_id)
 
+        try:
+            pipeline = IngestPipeline(index_directory=index_directory)
+            result = pipeline.ingest(file_path)
+
+            document.status = "success"
+            document.chunk_count = result.get("children_created")
+
+            session.add(document)
+            session.commit()
+
+        except Exception as e:
+            document.status = "failed"
+            session.add(document)
+            session.commit()
+            # No raise here — this runs in the background, nothing is listening for an HTTP error
+
+        finally:
+            if os.path.exists(file_path):
+                os.remove(file_path)
 # ==========================================
 # ROUTER
 # ==========================================
@@ -27,9 +47,10 @@ async def health():
 
 @router.post("/api/ingest")
 async def ingest_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     index_directory: str = os.getenv("FAISS_INDEX_DIR", "data/faiss_index"),
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_session)
 ):
     allowed_extensions = [".pdf", ".pptx"]
 
@@ -57,56 +78,15 @@ async def ingest_document(
     session.add(document)
     session.commit()
     session.refresh(document)
+    background_tasks.add_task(run_ingestion_task, document.id, temp_path, index_directory)
     
-    try:
-        pipeline = IngestPipeline(index_directory=index_directory)
-        result = pipeline.ingest(temp_path)
+    return {
+        "success": True,
+        "status": "processing",
+        "document_id": document.id,
+        "filename": file.filename
+    }
 
-        document.status = "success"
-
-        document.chunk_count = (
-            result.get("children_created")
-            if isinstance(result, dict)
-            else None
-        )
-
-        session.add(document)
-        session.commit()
-
-        return {
-            "success": True,
-            "document_id": document.id,
-            "filename": file.filename,
-            "data": result
-        }
-
-    except ValueError as e:
-
-        document.status = "failed"
-
-        session.add(document)
-        session.commit()
-
-        raise HTTPException(
-            status_code=400,
-            detail=str(e)
-        )
-
-    except Exception as e:
-
-        document.status = "failed"
-
-        session.add(document)
-        session.commit()
-
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
-        )
-
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
 
 
 # ==========================================
