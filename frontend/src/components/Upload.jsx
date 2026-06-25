@@ -20,7 +20,7 @@ function Upload({ onUploadSuccess }) {
     setStatus("uploading")
 
     try {
-      const response = await fetch("http://localhost:8000/api/ingest", {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/ingest`, {
         method: "POST",
         body: formData
       })

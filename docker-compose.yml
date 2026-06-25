@@ -23,7 +23,7 @@ services:
     environment:
       DB_URL: postgresql://kreat:kreat@db:5432/kreat
       FAISS_INDEX_DIR: data/faiss_index
-      ALLOWED_ORIGINS: http://localhost:5173
+      ALLOWED_ORIGINS: http://localhost:5173,http://192.168.15.166:5173
     volumes:
       - ./data:/app/data
 

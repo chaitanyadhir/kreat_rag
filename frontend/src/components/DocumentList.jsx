@@ -4,14 +4,14 @@ function DocumentList({ refresh }) {
   const [documents, setDocuments] = useState([])
 
   const fetchDocuments = async () => {
-    const response = await fetch("http://localhost:8000/api/documents")
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/documents`)
     const data = await response.json()
     setDocuments(data)
   }
 
   const handleDelete = async (id) => {
-    await fetch(`http://localhost:8000/api/documents/${id}`, {
-      method: "DELETE"
+    await fetch(`${import.meta.env.VITE_API_URL}/api/documents/${id}`, {
+      method: "DELETE" 
     })
     fetchDocuments()
   }
