@@ -4,6 +4,8 @@ import json
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Tuple, Optional
 
+from langsmith import traceable
+
 # =====================================================================
 # DATA CLASSES
 # =====================================================================
@@ -77,6 +79,7 @@ class HierarchicalSplitter:
         self.child_target = child_target
         self.child_overlap = child_overlap
 
+    @traceable(run_type="chain", name="split_document")
     def split_document(self, text: str, document_metadata: Dict[str, Any] = None) -> Tuple[List[ParentChunk], List[ChildChunk]]:
         """
         Processes document text and produces a list of ParentChunks and linked ChildChunks.
@@ -276,11 +279,13 @@ class BGEEmbedder:
             self._model = SentenceTransformer(self.model_name, device=self.device)
         return self._model
 
+    @traceable(run_type="embedding", name="embed_documents")
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """Generates embeddings for document chunks."""
         embeddings = self.model.encode(texts, normalize_embeddings=True)
         return embeddings.tolist()
 
+    @traceable(run_type="embedding", name="embed_query")
     def embed_query(self, query: str) -> List[float]:
         """
         Generates query embedding. Adds the recommended search query instruction
@@ -448,6 +453,7 @@ class IngestPipeline:
         self.model_name = model_name
         self.embedding_dimension = embedding_dimension
 
+    @traceable(run_type="chain", name="ingest_pipeline")
     def ingest(self, file_path: str, original_filename: str = None) -> Dict[str, Any]:
         """
         Runs the full ingestion pipeline for a single document.

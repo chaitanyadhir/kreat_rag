@@ -3,11 +3,23 @@ import sys
 import re
 import json
 import asyncio
+import contextvars
 from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
 
+from langsmith import traceable
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.split_embed import FAISSVectorStore, BGEEmbedder, ChildChunk, ParentChunk
+
+# =====================================================================
+# LANGSMITH TRACING
+# =====================================================================
+# @traceable works standalone, without LangChain. It only sends traces
+# when LANGSMITH_TRACING=true and LANGSMITH_API_KEY are set in the
+# environment (loaded from .env by main.py's load_dotenv()). If those
+# aren't set, the decorator is a harmless no-op — safe to leave in place
+# in every environment, including tests and CI.
 
 
 # =====================================================================
@@ -107,6 +119,7 @@ class HybridRetriever:
     # =========================================================
     # DENSE RETRIEVAL (FAISS Cosine Similarity)
     # =========================================================
+    @traceable(run_type="retriever", name="dense_search")
     def _dense_search(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
         """Returns top_k child chunks ranked by cosine similarity (via FAISS)."""
         query_emb = self.embedder.embed_query(query)
@@ -116,6 +129,7 @@ class HybridRetriever:
     # =========================================================
     # SPARSE RETRIEVAL (BM25 Keyword Search)
     # =========================================================
+    @traceable(run_type="retriever", name="sparse_search")
     def _sparse_search(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
         """Returns top_k child chunks ranked by BM25 keyword relevance."""
         tokenized_query = self._tokenize(query)
@@ -145,6 +159,7 @@ class HybridRetriever:
     # =========================================================
     # RECIPROCAL RANK FUSION (RRF)
     # =========================================================
+    @traceable(run_type="chain", name="rrf_fusion")
     def _reciprocal_rank_fusion(
         self,
         dense_results: List[Dict[str, Any]],
@@ -189,6 +204,7 @@ class HybridRetriever:
     # =========================================================
     # PUBLIC API: ASYNC RETRIEVE (parallel dense + sparse)
     # =========================================================
+    @traceable(run_type="chain", name="hybrid_retrieve")
     async def retrieve(self, query: str, dense_k: int = 10, sparse_k: int = 10, top_n: int = 3) -> Dict[str, Any]:
         """
         Full hybrid retrieval pipeline with PARALLEL search:
@@ -201,9 +217,14 @@ class HybridRetriever:
         """
         loop = asyncio.get_event_loop()
 
+        # Copy the current contextvars context (which holds LangSmith's active
+        # trace/parent-run info) so traces from the worker threads nest under
+        # this hybrid_retrieve run instead of showing up as disconnected roots.
+        ctx = contextvars.copy_context()
+
         # Run both searches in parallel on separate threads
-        dense_future = loop.run_in_executor(_thread_pool, self._dense_search, query, dense_k)
-        sparse_future = loop.run_in_executor(_thread_pool, self._sparse_search, query, sparse_k)
+        dense_future = loop.run_in_executor(_thread_pool, ctx.run, self._dense_search, query, dense_k)
+        sparse_future = loop.run_in_executor(_thread_pool, ctx.run, self._sparse_search, query, sparse_k)
 
         dense_results, sparse_results = await asyncio.gather(dense_future, sparse_future)
 
