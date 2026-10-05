@@ -2,13 +2,13 @@
 
 @theme {
   --color-brand-navy: #2F4156;
-  --color-brand-teal: #567C8D;
+  --color-brand-teal: #4E6F7E;
   --color-brand-sky: #C8D9E6;
   --color-brand-beige: #F5EFEB;
 }
 
 html {
-  font-size: 18px;
+  font-size: 19px;
 }
 
 body {
