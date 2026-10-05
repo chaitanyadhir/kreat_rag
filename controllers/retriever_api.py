@@ -22,6 +22,7 @@ async def retrieve_chunks(payload: RetrievalRequest):
             query=payload.query, dense_k=10, sparse_k=10, top_n=payload.top_n
         )
         return {"success": True, "data": result}
+    #here we can give reference to llm api whic utilizes the request creation and llm_provider to return result instead of retreived chunks 
     except Exception:
         logger.exception("Retrieval failed")
         raise HTTPException(status_code=500, detail="Retrieval failed")

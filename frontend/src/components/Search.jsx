@@ -3,7 +3,8 @@ import { useState } from "react"
 
 function Search() {
   const [query, setQuery] = useState("")
-  const [results, setResults] = useState([])
+  const [answer, setAnswer] = useState("")
+  const [sources, setSources] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
 
@@ -11,9 +12,11 @@ function Search() {
     if (!query.trim()) return
     setLoading(true)
     setError("")
+    setAnswer("")
+    setSources([])
 
     try {
-      const response = await fetch(`${API}/api/retrieve`, {
+      const response = await fetch(`${API}/api/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query })
@@ -22,9 +25,10 @@ function Search() {
       const data = await response.json()
 
       if (response.ok) {
-        setResults(Array.isArray(data.data.fused_top_results) ? data.data.fused_top_results : [])
+        setAnswer(data.answer)
+        setSources(Array.isArray(data.sources) ? data.sources : [])
       } else {
-        setError(data.detail || "Retrieval failed")
+        setError(data.detail || "Request failed")
       }
     } catch (err) {
       setError("Could not reach the server")
@@ -35,7 +39,7 @@ function Search() {
 
   return (
     <div className="p-6">
-      <h2 className="text-xl font-semibold mb-4">Search</h2>
+      <h2 className="text-xl font-semibold mb-4">Ask your documents</h2>
       <div className="flex gap-2">
         <input
           type="text"
@@ -50,27 +54,33 @@ function Search() {
           disabled={loading}
           className="bg-blue-500 text-white px-4 py-2 rounded"
         >
-          {loading ? "Searching..." : "Search"}
+          {loading ? "Thinking..." : "Ask"}
         </button>
       </div>
 
       {error && <p className="text-red-500 mt-4">{error}</p>}
 
-      <div className="mt-6 space-y-4">
-        {results.map((result, index) => (
-          <div key={index} className="border rounded p-4">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-sm font-medium text-blue-600">
-                {result.parent.metadata?.source || "Unknown source"}
-              </span>
-              <span className="text-xs text-gray-400">
-                Score: {result.rrf_score.toFixed(3)}
-              </span>
-            </div>
-            <p className="text-sm text-gray-700">{result.child.text}</p>
+      {answer && (
+        <div className="mt-6 border rounded p-4">
+          <p className="text-gray-800 whitespace-pre-wrap">{answer}</p>
+        </div>
+      )}
+
+      {sources.length > 0 && (
+        <div className="mt-4">
+          <h3 className="text-sm font-semibold text-gray-600 mb-2">Sources</h3>
+          <div className="space-y-2">
+            {sources.map((s) => (
+              <div key={s.id} className="border rounded p-3">
+                <span className="text-sm font-medium text-blue-600">
+                  [{s.id}] {s.source}
+                </span>
+                <p className="text-xs text-gray-500 mt-1">{s.snippet}</p>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </div>
+      )}
     </div>
   )
 }

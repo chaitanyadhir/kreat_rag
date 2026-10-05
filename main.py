@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from db.init_db import create_db_and_tables
 from tools.retriever_store import index_exists, reload_retriever
 from controllers.retriever_api import router as retriever_router
+from controllers.llm_api import router as llm_router
 # Load environment variables from .env file
 load_dotenv()
 
@@ -47,6 +48,7 @@ app.include_router(parser_router)
 app.include_router(split_embed_router)
 app.include_router(retriever_router)
 app.include_router(documents_router)
+app.include_router(llm_router)
 # CORS Configuration
 origins = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
 
