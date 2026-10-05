@@ -1,16 +1,17 @@
+import { API } from "./api"
 import { useState, useEffect } from "react"
 
 function DocumentList({ refresh }) {
   const [documents, setDocuments] = useState([])
 
   const fetchDocuments = async () => {
-    const response = await fetch("http://localhost:8000/api/documents")
+    const response = await fetch(`${API}/api/documents`)
     const data = await response.json()
     setDocuments(data)
   }
 
   const handleDelete = async (id) => {
-    await fetch(`http://localhost:8000/api/documents/${id}`, {
+    await fetch(`${API}/api/documents/${id}`, {
       method: "DELETE"
     })
     fetchDocuments()

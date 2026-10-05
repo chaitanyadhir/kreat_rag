@@ -31,3 +31,10 @@ def reload_retriever() -> HybridRetriever:
         new = HybridRetriever(index_directory=_index_dir())
     _retriever = new  # atomic reference swap; in-flight requests keep the old one
     return new
+
+
+
+def reset_retriever() -> None:
+    """Drop the in-memory retriever (e.g. after the index is deleted)."""
+    global _retriever
+    _retriever = None

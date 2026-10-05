@@ -1,3 +1,4 @@
+import { API } from "./api"
 import { useState } from "react"
 
 function Upload({ onUploadSuccess }) {
@@ -8,7 +9,7 @@ function Upload({ onUploadSuccess }) {
   const handleFileChange = (e) => {
     // get the first file from e.target.files and set it
     setFile(e.target.files[0])
-}
+  }
 
   const handleUpload = async () => {
     if (!file) return
@@ -20,7 +21,7 @@ function Upload({ onUploadSuccess }) {
     setStatus("uploading")
 
     try {
-      const response = await fetch("http://localhost:8000/api/ingest", {
+      const response = await fetch(`${API}/api/ingest`, {
         method: "POST",
         body: formData
       })

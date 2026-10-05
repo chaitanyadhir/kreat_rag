@@ -72,7 +72,7 @@ EXPOSE 8000
 # =============================================================================
 # Docker will periodically hit /health. If it returns non-200 three times in
 # a row, the container is marked "unhealthy". Useful in compose / Kubernetes.
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=300s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # =============================================================================

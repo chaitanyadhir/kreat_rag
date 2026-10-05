@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from db.init_db import create_db_and_tables
 from tools.retriever_store import index_exists, reload_retriever
+from controllers.retriever_api import router as retriever_router
 # Load environment variables from .env file
 load_dotenv()
 
@@ -62,10 +63,10 @@ async def health():
 
 
 # Include all controller routers
-app.include_router(parser_router, tags=["Parser"])
-app.include_router(split_embed_router, tags=["Split & Embed"])
-app.include_router(retriever_router, tags=["Retrieval"])
-app.include_router(documents_router, tags=["Documents"])
+from controllers.parser_api import router as parser_router
+from controllers.split_embed_api import router as split_embed_router
+from controllers.retriever_api import router as retriever_router
+from controllers.documents_api import router as documents_router
 
 # ==========================================
 # EXAMPLE USAGE

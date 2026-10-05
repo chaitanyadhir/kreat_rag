@@ -4,7 +4,7 @@ from db.session import get_session
 from db.models import Document
 from sqlmodel import Session, select
 import os
-
+from tools.retriever_store import reset_retriever
 router = APIRouter()
 
 
@@ -40,6 +40,7 @@ def delete_document(
         # wipe the FAISS index directory
         import shutil
         shutil.rmtree(index_dir, ignore_errors=True)
+        reset_retriever()
     return {
         "message": "Document deleted successfully"
     }

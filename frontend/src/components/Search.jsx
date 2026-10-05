@@ -1,3 +1,4 @@
+import { API } from "./api"
 import { useState } from "react"
 
 function Search() {
@@ -12,7 +13,7 @@ function Search() {
     setError("")
 
     try {
-      const response = await fetch("http://localhost:8000/api/retrieve", {
+      const response = await fetch(`${API}/api/retrieve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query })
