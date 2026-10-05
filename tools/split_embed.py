@@ -6,6 +6,20 @@ from typing import List, Dict, Any, Tuple, Optional
 
 from langsmith import traceable
 
+import threading
+
+INDEX_LOCK = threading.Lock()  # guards index load/save/reload (single worker)
+
+_EMBEDDERS: Dict[str, "BGEEmbedder"] = {}
+_EMBEDDER_LOCK = threading.Lock()
+def get_embedder(model_name: str = "BAAI/bge-large-en-v1.5") -> "BGEEmbedder":
+    """One shared embedder per model, so ingest and retrieval don't each load 1.3 GB."""
+    with _EMBEDDER_LOCK:
+        if model_name not in _EMBEDDERS:
+            emb = BGEEmbedder(model_name=model_name)
+            _ = emb.model  # force load inside the lock
+            _EMBEDDERS[model_name] = emb
+        return _EMBEDDERS[model_name]
 # =====================================================================
 # DATA CLASSES
 # =====================================================================
@@ -80,7 +94,7 @@ class HierarchicalSplitter:
         self.child_overlap = child_overlap
 
     @traceable(run_type="chain", name="split_document")
-    def split_document(self, text: str, document_metadata: Dict[str, Any] = None) -> Tuple[List[ParentChunk], List[ChildChunk]]:
+    def split_document(self, text, document_metadata=None, id_prefix: str = ""):
         """
         Processes document text and produces a list of ParentChunks and linked ChildChunks.
         """
@@ -123,7 +137,7 @@ class HierarchicalSplitter:
             
             # If the section fits within the maximum token budget
             if section_tokens <= 1200:
-                parent_id = f"parent_{parent_counter}"
+                parent_id = f"{id_prefix}parent_{parent_counter}"
                 parent_counter += 1
                 parent_chunks.append(ParentChunk(
                     id=parent_id,
@@ -134,7 +148,7 @@ class HierarchicalSplitter:
                 # If too large, split using sliding window
                 sub_sections = self._sliding_window_split(section, self.parent_target, self.parent_overlap)
                 for idx, sub_sec in enumerate(sub_sections):
-                    parent_id = f"parent_{parent_counter}_{idx}"
+                    parent_id = f"{id_prefix}parent_{parent_counter}_{idx}"
                     parent_chunks.append(ParentChunk(
                         id=parent_id,
                         text=sub_sec,
@@ -147,6 +161,8 @@ class HierarchicalSplitter:
             children = self._split_parent_into_children(parent.text, parent.id)
             parent.child_ids = [c.id for c in children]
             child_chunks.extend(children)
+            for c in children:
+                c.metadata = {**doc_metadata}
 
         return parent_chunks, child_chunks
 
@@ -454,60 +470,53 @@ class IngestPipeline:
         self.embedding_dimension = embedding_dimension
 
     @traceable(run_type="chain", name="ingest_pipeline")
-    def ingest(self, file_path: str, original_filename: str = None) -> Dict[str, Any]:
-        """
-        Runs the full ingestion pipeline for a single document.
-
-        Args:
-            file_path (str): Absolute path to a PDF or PPTX file.
-
-        Returns:
-            Dict[str, Any]: Summary of what was ingested (parent count, child count, index path).
-        """
+    def ingest(self, file_path: str, original_filename: str = None, document_id: int = None) -> Dict[str, Any]:
         from tools.document_parser import ParserFactory
 
-        # 1. Parse the document
+        source_name = original_filename or os.path.basename(file_path)
+
         parser = ParserFactory.get_parser(file_path)
         parsed_pages = parser.parse(file_path)
 
-        # Combine all page/slide text into one document string
-        full_text = "\n\n".join(page["text"] for page in parsed_pages if page["text"])
-
+        full_text = "\n\n".join(p["text"] for p in parsed_pages if p["text"])
         if not full_text.strip():
-            raise ValueError(f"No text could be extracted from: {file_path}")
+            raise ValueError(f"No text could be extracted from: {source_name}")
 
         doc_metadata = {
-            "source": original_filename or os.path.basename(file_path),
+            "source": source_name,
+            "document_id": document_id,
             "file_type": parsed_pages[0]["metadata"].get("file_type", "unknown"),
-            "total_units": len(parsed_pages)
+            "total_units": len(parsed_pages),
         }
 
-        # 2. Split into parent/child chunks
-        splitter = HierarchicalSplitter()
-        parents, children = splitter.split_document(full_text, doc_metadata)
-
+        id_prefix = f"doc{document_id}_" if document_id is not None else f"{uuid.uuid4().hex[:8]}_"
+        parents, children = HierarchicalSplitter().split_document(
+            full_text, doc_metadata, id_prefix=id_prefix
+        )
         if not children:
             raise ValueError("Splitter produced zero child chunks from the extracted text.")
 
-        # 3. Embed child chunks
-        embedder = BGEEmbedder(model_name=self.model_name)
-        child_texts = [c.text for c in children]
-        child_embeddings = embedder.embed_documents(child_texts)
+        # Slow part happens OUTSIDE the lock
+        embedder = get_embedder(self.model_name)
+        embeddings = embedder.embed_documents([c.text for c in children])
 
-        # 4. Build FAISS index and add documents
-        vector_store = FAISSVectorStore(dimension=self.embedding_dimension)
-        vector_store.add_documents(children, parents, child_embeddings)
-
-        # 5. Save to disk
-        vector_store.save(self.index_directory)
+        # Only load -> append -> save is locked
+        with INDEX_LOCK:
+            store = FAISSVectorStore(dimension=self.embedding_dimension)
+            if (
+                os.path.exists(os.path.join(self.index_directory, "index.faiss"))
+                and os.path.exists(os.path.join(self.index_directory, "metadata.json"))
+            ):
+                store.load(self.index_directory)
+            store.add_documents(children, parents, embeddings)
+            store.save(self.index_directory)
 
         return {
-            "source": os.path.basename(file_path),
+            "source": source_name,
             "parents_created": len(parents),
             "children_created": len(children),
-            "index_saved_to": os.path.abspath(self.index_directory)
+            "index_saved_to": os.path.abspath(self.index_directory),
         }
-
 
 # ==========================================
 # EXAMPLE USAGE

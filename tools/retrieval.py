@@ -6,6 +6,7 @@ import asyncio
 import contextvars
 from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
+from tools.split_embed import FAISSVectorStore, get_embedder, ChildChunk, ParentChunk
 
 from langsmith import traceable
 
@@ -82,7 +83,7 @@ class HybridRetriever:
         self.vector_store.load(index_directory)
 
         # Load embedder for query encoding (this is the expensive step)
-        self.embedder = BGEEmbedder(model_name=model_name)
+        self.embedder = get_embedder(model_name)
 
         # Force-load model weights NOW so first request is fast
         self.embedder.embed_query("warmup")
@@ -215,7 +216,7 @@ class HybridRetriever:
         Both searches are CPU-bound, so we offload them to a ThreadPoolExecutor
         and await them concurrently using asyncio.gather.
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop() 
 
         # Copy the current contextvars context (which holds LangSmith's active
         # trace/parent-run info) so traces from the worker threads nest under

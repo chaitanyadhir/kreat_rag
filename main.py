@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from db.init_db import create_db_and_tables
-
+from tools.retriever_store import index_exists, reload_retriever
 # Load environment variables from .env file
 load_dotenv()
 
@@ -16,7 +16,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # Import routers from controllers
 from controllers.parser_api import router as parser_router
 from controllers.split_embed_api import router as split_embed_router
-from controllers.retriever_api import router as retriever_router, warmup_retriever
+
 from controllers.documents_api import router as documents_router
 logger = logging.getLogger("kreat_rag")
 
@@ -26,21 +26,15 @@ logger = logging.getLogger("kreat_rag")
 # ==========================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Runs once when the server starts. We use this to pre-load the BGE model
-    weights and FAISS index so the first /api/retrieve request is fast.
-    """
     create_db_and_tables()
-    index_dir = os.environ.get("FAISS_INDEX_DIR")
-    if index_dir and os.path.exists(index_dir):
-        logger.info("Warming up HybridRetriever (loading BGE model + FAISS index)...")
+    if index_exists():
         try:
-            warmup_retriever(index_directory=index_dir)
-            logger.info("HybridRetriever warm-up complete.")
-        except Exception as e:
-            logger.warning(f"Could not warm up retriever (index may not exist yet): {e}")
+            logger.info("Loading retriever...")
+            reload_retriever()
+        except Exception:
+            logger.exception("Retriever warm-up failed")
     else:
-        logger.info(f"No FAISS index found at '{index_dir}'. Skipping warm-up. Run /api/ingest first.")
+        logger.info("No index yet. Upload a document via /api/ingest.")
     yield
 
 

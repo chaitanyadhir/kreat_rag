@@ -8,6 +8,7 @@ class Document(SQLModel, table=True):
     filename: str
     status: str
     chunk_count: Optional[int] = Field(default=None)
+    error_message: Optional[str] = Field(default=None)
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )

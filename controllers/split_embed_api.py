@@ -1,107 +1,100 @@
 import os
-import sys
+import logging
 import tempfile
 import shutil
-from db.session import get_session 
-from db.models import Document 
-from db.session import engine
-from sqlmodel import Session
 from fastapi import APIRouter, HTTPException, UploadFile, File, Depends, BackgroundTasks
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from sqlmodel import Session
+
+from db.session import get_session, engine
+from db.models import Document
 from tools.split_embed import IngestPipeline
+from tools.retriever_store import reload_retriever
 
-
-def run_ingestion_task(document_id: int, file_path: str, index_directory: str, original_filename: str):
-    with Session(engine) as session:
-        document = session.get(Document, document_id)
-
-        try:
-            pipeline = IngestPipeline(index_directory=index_directory)
-            result = pipeline.ingest(file_path, original_filename=original_filename)
-
-            document.status = "success"
-            document.chunk_count = result.get("children_created")
-
-            session.add(document)
-            session.commit()
-
-        except Exception as e:
-            document.status = "failed"
-            session.add(document)
-            session.commit()
-            # No raise here — this runs in the background, nothing is listening for an HTTP error
-
-        finally:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-# ==========================================
-# ROUTER
-# ==========================================
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
 
-@router.get("/health")
-async def health():
-    return {"status": "healthy"}
+
+def _set_status(document_id: int, status: str, chunk_count=None, error=None):
+    with Session(engine) as session:
+        doc = session.get(Document, document_id)
+        if doc:
+            doc.status = status
+            doc.chunk_count = chunk_count
+            doc.error_message = error
+            session.add(doc)
+            session.commit()
+
+
+def run_ingestion_task(document_id: int, file_path: str, original_filename: str):
+    try:
+        result = IngestPipeline().ingest(
+            file_path, original_filename=original_filename, document_id=document_id
+        )
+        _set_status(document_id, "success", chunk_count=result["children_created"])
+    except Exception as e:
+        logger.exception(f"Ingestion failed for document {document_id}")
+        _set_status(document_id, "failed", error=str(e)[:500])
+        return
+    finally:
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                logger.warning(f"Could not remove temp file {file_path}")
+
+    # Ingest succeeded; a reload failure must not flip the status to failed
+    try:
+        reload_retriever()
+    except Exception:
+        logger.exception("Retriever reload failed after ingest")
 
 
 @router.post("/api/ingest")
 async def ingest_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    index_directory: str = os.getenv("FAISS_INDEX_DIR", "data/faiss_index"),
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
 ):
-    allowed_extensions = [".pdf", ".pptx"]
+    file_ext = os.path.splitext(file.filename or "")[1].lower()
+    if file_ext not in (".pdf", ".pptx"):
+        raise HTTPException(status_code=400, detail="Only PDF and PPTX files are supported")
 
-    file_ext = os.path.splitext(file.filename)[1].lower()
+    temp_path = None
+    document = None
+    try:
+        size = 0
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
+            temp_path = tmp.name
+            while chunk := file.file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="File too large (max 25 MB)")
+                tmp.write(chunk)
 
-    if file_ext not in allowed_extensions:
-        raise HTTPException(
-            status_code=400,
-            detail="Only PDF and PPTX files are supported"
-        )
+        document = Document(filename=file.filename, status="processing")
+        session.add(document)
+        session.commit()
+        session.refresh(document)
 
-    with tempfile.NamedTemporaryFile(
-        delete=False,
-        suffix=file_ext
-    ) as temp_file:
+        background_tasks.add_task(run_ingestion_task, document.id, temp_path, file.filename)
 
-        shutil.copyfileobj(file.file, temp_file)
-        temp_path = temp_file.name
-        
-    document = Document(
-        filename=file.filename,
-        status="processing"
-    )
+    except HTTPException:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise
+    except Exception:
+        logger.exception(f"Failed to start ingestion for {file.filename}")
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+        if document and document.id:
+            _set_status(document.id, "failed", error="Failed to queue ingestion")
+        raise HTTPException(status_code=500, detail="Failed to process upload")
 
-    session.add(document)
-    session.commit()
-    session.refresh(document)
-    background_tasks.add_task(run_ingestion_task, document.id, temp_path, index_directory, file.filename)
-    
     return {
         "success": True,
         "status": "processing",
         "document_id": document.id,
-        "filename": file.filename
+        "filename": file.filename,
     }
-
-
-
-# ==========================================
-# EXAMPLE USAGE
-# ==========================================
-#
-# Run:
-#   uvicorn controllers.split_embed_api:app --host 0.0.0.0 --port 8001 --reload
-#
-# Ingest a PPTX file (parse → split → embed → save to FAISS):
-#   curl -X POST http://localhost:8001/api/ingest \
-#     -H "Content-Type: application/json" \
-#     -d '{"file_path": "/home/chaitanyadhir/rag/kreat_rag/data/Information Security Management System (ISMS) Policy Summaries_ (1).pptx"}'
-#
-# With custom index directory:
-#   curl -X POST http://localhost:8001/api/ingest \
-#     -H "Content-Type: application/json" \
-#     -d '{"file_path": "data/policy.pdf", "index_directory": "data/my_custom_index"}'
