@@ -3,7 +3,7 @@
 import os
 from functools import lru_cache
 from typing import Any, Mapping
-
+from langsmith import traceable
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 
@@ -16,7 +16,7 @@ class LLM:
         model: str | None = None,
     ) -> None:
         self.config_payload = dict(config_payload or {})
-        self.model = model or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.model = model or os.getenv("GEMINI_MODEL", "models/gemini-3.8-flash")
         self._client: ChatGoogleGenerativeAI | None = None
 
     def _model_config(self) -> dict[str, Any]:
@@ -62,6 +62,7 @@ class LLM:
             return "".join(parts)
         return str(content)
 
+    @traceable(run_type="llm", name="LLM")
     def llm_call(self, prompt: str) -> str:
         """Blocking call: returns the response text."""
         return self._to_text(self._get_client().invoke(prompt).content)
