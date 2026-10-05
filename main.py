@@ -66,10 +66,10 @@ async def health():
 
 
 # Include all controller routers
-from controllers.parser_api import router as parser_router
-from controllers.split_embed_api import router as split_embed_router
-from controllers.retriever_api import router as retriever_router
-from controllers.documents_api import router as documents_router
+# from controllers.parser_api import router as parser_router
+# from controllers.split_embed_api import router as split_embed_router
+# from controllers.retriever_api import router as retriever_router
+# from controllers.documents_api import router as documents_router
 
 # ==========================================
 # EXAMPLE USAGE
