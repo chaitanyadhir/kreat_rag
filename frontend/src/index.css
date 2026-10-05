@@ -1,1 +1,23 @@
 @import "tailwindcss";
+
+@theme {
+  --color-brand-navy: #2F4156;
+  --color-brand-teal: #567C8D;
+  --color-brand-sky: #C8D9E6;
+  --color-brand-beige: #F5EFEB;
+}
+
+html {
+  font-size: 18px;
+}
+
+body {
+  background-color: var(--color-brand-beige);
+  color: var(--color-brand-navy);
+}
+
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.msg-in { animation: msg-in 0.25s ease-out; }
