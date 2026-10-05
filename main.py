@@ -43,7 +43,10 @@ async def lifespan(app: FastAPI):
 # MAIN FASTAPI APP
 # ==========================================
 app = FastAPI(title="Kreat RAG API", lifespan=lifespan)
-
+app.include_router(parser_router)
+app.include_router(split_embed_router)
+app.include_router(retriever_router)
+app.include_router(documents_router)
 # CORS Configuration
 origins = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
 

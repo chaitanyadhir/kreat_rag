@@ -224,9 +224,10 @@ class HybridRetriever:
         ctx = contextvars.copy_context()
 
         # Run both searches in parallel on separate threads
-        dense_future = loop.run_in_executor(_thread_pool, ctx.run, self._dense_search, query, dense_k)
-        sparse_future = loop.run_in_executor(_thread_pool, ctx.run, self._sparse_search, query, sparse_k)
-
+        # dense_future = loop.run_in_executor(_thread_pool, ctx.run, self._dense_search, query, dense_k)
+        # sparse_future = loop.run_in_executor(_thread_pool, ctx.run, self._sparse_search, query, sparse_k)
+        dense_future = loop.run_in_executor(_thread_pool, self._dense_search, query, dense_k)
+        sparse_future = loop.run_in_executor(_thread_pool, self._sparse_search, query, sparse_k)
         dense_results, sparse_results = await asyncio.gather(dense_future, sparse_future)
 
         # RRF fusion is lightweight, runs on the main thread
