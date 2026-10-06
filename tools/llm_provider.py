@@ -72,6 +72,12 @@ class LLM:
         response = await self._get_client().ainvoke(prompt)
         return self._to_text(response.content)
 
+    async def astream_call(self, prompt: str):
+        async for chunk in self._get_client().astream(prompt):
+            text = self._to_text(chunk.content)
+            if text:
+                yield text
+
 
 @lru_cache(maxsize=1)
 def _default_llm() -> LLM:
@@ -85,3 +91,8 @@ def llm_call(prompt: str) -> str:
 
 async def allm_call(prompt: str) -> str:
     return await _default_llm().allm_call(prompt)
+
+
+async def astream_call(prompt: str):
+    async for text in _default_llm().astream_call(prompt):
+        yield text

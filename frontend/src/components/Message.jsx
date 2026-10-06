@@ -102,7 +102,7 @@ export default function Message({ message, panelOpenFor, onOpenSources }) {
 
         {message.status === "error" && <p className="text-red-500">{message.text}</p>}
 
-        {message.status === "done" && (
+        {(message.status === "done" || message.status === "streaming") && (
           <>
             <div className="leading-relaxed text-brand-navy">
               <FormattedText

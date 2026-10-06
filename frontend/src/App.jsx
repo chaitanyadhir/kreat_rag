@@ -5,6 +5,8 @@ import Message from "./components/Message"
 import ChatInput from "./components/ChatInput"
 import SourcesPanel from "./components/SourcesPanel"
 
+const WS_URL = API.replace(/^http/, "ws") + "/ws/ask"
+
 function App() {
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(false)
@@ -32,7 +34,7 @@ function App() {
   const patch = (id, fields) =>
     setMessages((all) => all.map((m) => (m.id === id ? { ...m, ...fields } : m)))
 
-  const ask = async (query) => {
+  const ask = (query) => {
     const userId = ++idRef.current
     const botId = ++idRef.current
     setMessages((all) => [
@@ -42,24 +44,21 @@ function App() {
     ])
     setLoading(true)
 
-    try {
-      const res = await fetch(`${API}/api/ask`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
-      })
-      const data = await res.json()
-      if (res.ok) {
-        patch(botId, { status: "done", text: data.answer, sources: data.sources ?? [] })
-      } else {
-        patch(botId, {
-          status: "error",
-          text: typeof data.detail === "string" ? data.detail : "Request failed",
-        })
-      }
-    } catch {
-      patch(botId, { status: "error", text: "Could not reach the server" })
-    } finally {
+    const ws = new WebSocket(WS_URL)
+    let finished = false
+    ws.onopen = () => ws.send(JSON.stringify({ query }))
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data)
+      if (msg.type === "sources") patch(botId, { sources: msg.sources })
+      else if (msg.type === "token")
+        setMessages((all) =>
+          all.map((m) => m.id === botId ? { ...m, status: "streaming", text: m.text + msg.text } : m)
+        )
+      else if (msg.type === "done") { finished = true; patch(botId, { status: "done" }) }
+      else if (msg.type === "error") { finished = true; patch(botId, { status: "error", text: msg.detail }) }
+    }
+    ws.onclose = () => {
+      if (!finished) patch(botId, { status: "error", text: "Connection lost" })
       setLoading(false)
     }
   }
