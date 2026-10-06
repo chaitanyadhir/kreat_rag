@@ -64,19 +64,27 @@ def format_chunks(results: list[dict[str, Any]], max_chars: int = MAX_CONTEXT_CH
     return "\n\n---\n\n".join(blocks), sources
 
 
-def build_prompt(prompt_to_pass: str, query: str, chunks: str) -> str:
+def build_prompt(prompt_to_pass: str, query: str, chunks: str, history: str = "") -> str:
     """Fill the template. Single-pass substitution, so braces or placeholder-like
-    text inside the query or documents are never re-interpreted."""
-    values = {"query": query, "chunks_extracted": chunks}
+    text inside the query, history or documents are never re-interpreted.
+    {history_block} is optional in the template; with no history it renders empty."""
+    history_block = (
+        "Previous conversation (only to understand what a follow-up question refers to; "
+        "facts must still come from the context above):\n"
+        f"{history}\n\n"
+        if history
+        else ""
+    )
+    values = {"query": query, "chunks_extracted": chunks, "history_block": history_block}
     return re.sub(
-        r"\{(query|chunks_extracted)\}",
+        r"\{(query|chunks_extracted|history_block)\}",
         lambda m: values[m.group(1)],
         prompt_to_pass,
     )
 
 
-def create_request(query: str, results: list[dict[str, Any]]):
+def create_request(query: str, results: list[dict[str, Any]], history: str = ""):
     """Convenience wrapper: returns (final_prompt, sources)."""
     chunks_text, sources = format_chunks(results)
-    prompt = build_prompt(load_prompt_template(), query, chunks_text)
+    prompt = build_prompt(load_prompt_template(), query, chunks_text, history)
     return prompt, sources

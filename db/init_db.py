@@ -2,7 +2,7 @@ from sqlmodel import SQLModel
 
 # Even though it isn't explicitly called in the function, importing Document
 # registers its schema with SQLModel.metadata so create_all knows it exists.
-from db.models import Document
+from db.models import Document, ChatSession, ChatMessage  # noqa: F401
 from db.session import engine
 
 

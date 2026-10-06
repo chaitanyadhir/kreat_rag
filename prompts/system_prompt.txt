@@ -13,6 +13,6 @@ Rules:
 Context:
 {chunks_extracted}
 
-Question: {query}
+{history_block}Question: {query}
 
 Answer:

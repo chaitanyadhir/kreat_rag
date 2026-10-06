@@ -60,3 +60,21 @@ export const UploadIcon = (p) => (
     <path d="M12 3v12" />
   </Svg>
 )
+
+export const MenuIcon = (p) => (
+  <Svg {...p}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <path d="M9 3v18" />
+  </Svg>
+)
+export const PlusIcon = (p) => (
+  <Svg {...p}>
+    <path d="M12 5v14M5 12h14" />
+  </Svg>
+)
+export const PencilIcon = (p) => (
+  <Svg {...p}>
+    <path d="M12 20h9" />
+    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+  </Svg>
+)
